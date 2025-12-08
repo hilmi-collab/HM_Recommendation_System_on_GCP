@@ -8,6 +8,7 @@
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # ------------------------------------------------------------------------------
@@ -76,22 +77,31 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COM
 echo -e "${GREEN}✔ IAM permissions assigned.${NC}"
 
 # ------------------------------------------------------------------------------
-# 4. CREATE COLAB RUNTIME TEMPLATE
+# 4. CREATE COLAB RUNTIME TEMPLATE (FIXED WITH BETA)
 # ------------------------------------------------------------------------------
 echo -e "${BLUE}[Step 3/5] Creating Colab Runtime Template...${NC}"
 TEMPLATE_NAME="hm-workshop-gpu-template"
 
-if gcloud ai runtime-templates list --region=us-central1 --filter="displayName=$TEMPLATE_NAME" --format="value(name)" | grep -q "$TEMPLATE_NAME"; then
+# Hata düzeltmesi: 'gcloud ai' yerine 'gcloud beta ai' kullanıyoruz.
+if gcloud beta ai runtime-templates list --region=us-central1 --filter="displayName=$TEMPLATE_NAME" --format="value(name)" 2>/dev/null | grep -q "$TEMPLATE_NAME"; then
     echo -e "${YELLOW}[Info]${NC} Template '$TEMPLATE_NAME' already exists. Skipping."
 else
-    gcloud ai runtime-templates create $TEMPLATE_NAME \
+    # Create template using BETA command to avoid "Invalid choice" error
+    gcloud beta ai runtime-templates create $TEMPLATE_NAME \
         --project=$PROJECT_ID \
         --region=us-central1 \
         --display-name=$TEMPLATE_NAME \
         --machine-type=n1-standard-4 \
         --accelerator-type=NVIDIA_TESLA_T4 \
         --accelerator-count=1 > /dev/null 2>&1
-    echo -e "${GREEN}✔ Runtime Template ($TEMPLATE_NAME) created.${NC}"
+        
+    # Check if creation was successful
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✔ Runtime Template ($TEMPLATE_NAME) created.${NC}"
+    else
+        echo -e "${RED}[Error] Failed to create Runtime Template. Please check quotas or permissions.${NC}"
+        # Scripti durdurmuyoruz, manuel olarak oluşturabilirler diye devam ediyor.
+    fi
 fi
 
 # ------------------------------------------------------------------------------
