@@ -43,6 +43,7 @@ echo ""
 # 2. ENABLE APIs
 # ------------------------------------------------------------------------------
 echo -e "${BLUE}[Step 1/5] Enabling Google Cloud APIs...${NC}"
+# Added 'notebooks.googleapis.com' just in case, but 'aiplatform' is key for Colab Enterprise
 gcloud services enable \
     aiplatform.googleapis.com \
     dataform.googleapis.com \
@@ -77,30 +78,46 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COM
 echo -e "${GREEN}✔ IAM permissions assigned.${NC}"
 
 # ------------------------------------------------------------------------------
-# 4. CREATE COLAB RUNTIME TEMPLATE (FIXED WITH BETA)
+# 4. CREATE COLAB RUNTIME TEMPLATE (UPDATED COMMAND)
 # ------------------------------------------------------------------------------
 echo -e "${BLUE}[Step 3/5] Creating Colab Runtime Template...${NC}"
 TEMPLATE_NAME="hm-workshop-gpu-template"
+REGION="us-central1"
 
-# Hata düzeltmesi: 'gcloud ai' yerine 'gcloud beta ai' kullanıyoruz.
-if gcloud beta ai runtime-templates list --region=us-central1 --filter="displayName=$TEMPLATE_NAME" --format="value(name)" 2>/dev/null | grep -q "$TEMPLATE_NAME"; then
+# Check if template exists using the new 'gcloud colab' command
+if gcloud colab runtime-templates list --region=$REGION --filter="displayName=$TEMPLATE_NAME" --format="value(name)" 2>/dev/null | grep -q "$TEMPLATE_NAME"; then
     echo -e "${YELLOW}[Info]${NC} Template '$TEMPLATE_NAME' already exists. Skipping."
 else
-    # Create template using BETA command to avoid "Invalid choice" error
-    gcloud beta ai runtime-templates create $TEMPLATE_NAME \
+    # Correct command based on your documentation finding
+    # We try standard command first. If Cloud Shell SDK is old, we might need beta, 
+    # but let's assume standard works as per docs.
+    gcloud colab runtime-templates create \
         --project=$PROJECT_ID \
-        --region=us-central1 \
+        --region=$REGION \
         --display-name=$TEMPLATE_NAME \
         --machine-type=n1-standard-4 \
         --accelerator-type=NVIDIA_TESLA_T4 \
         --accelerator-count=1 > /dev/null 2>&1
         
-    # Check if creation was successful
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✔ Runtime Template ($TEMPLATE_NAME) created.${NC}"
     else
-        echo -e "${RED}[Error] Failed to create Runtime Template. Please check quotas or permissions.${NC}"
-        # Scripti durdurmuyoruz, manuel olarak oluşturabilirler diye devam ediyor.
+        # Fallback to BETA if standard fails (common in Cloud Shell)
+        echo -e "${YELLOW}[Info] Standard command failed, trying BETA...${NC}"
+        gcloud beta colab runtime-templates create \
+            --project=$PROJECT_ID \
+            --region=$REGION \
+            --display-name=$TEMPLATE_NAME \
+            --machine-type=n1-standard-4 \
+            --accelerator-type=NVIDIA_TESLA_T4 \
+            --accelerator-count=1 > /dev/null 2>&1
+            
+        if [ $? -eq 0 ]; then
+             echo -e "${GREEN}✔ Runtime Template ($TEMPLATE_NAME) created (via Beta).${NC}"
+        else
+             echo -e "${RED}[Error] Failed to create Runtime Template.${NC}"
+             echo -e "${RED}Please check if 'aiplatform.googleapis.com' is fully enabled or quota issues.${NC}"
+        fi
     fi
 fi
 
