@@ -10,7 +10,7 @@ NC='\033[0m' # No Color
 # CONFIGURATION
 # ------------------------------------------------------------------
 # REPLACE THIS URL with your actual GitHub raw URL for the notebook
-NOTEBOOK_URL="https://raw.githubusercontent.com/hilmi-collab/SENIN_REPO_ADIN/main/hm_two_tower_training.ipynb"
+NOTEBOOK_URL="https://raw.githubusercontent.com/hilmi-collab/HM_Recommendation_System_on_GCP/main/hm_two_tower_training.ipynb"
 NOTEBOOK_FILENAME="hm_two_tower_training.ipynb"
 
 echo -e "${BLUE}======================================================${NC}"
