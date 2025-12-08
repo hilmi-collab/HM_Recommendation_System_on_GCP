@@ -325,101 +325,10 @@ print("✅ Model saved successfully.")
 cell_8 = nbf.v4.new_code_cell(text_8)
 cell_8.metadata = {"cellView": "form", "id": "save_cell"}
 
-# -------------------------------------------------------------------------
-# CELL 9: DEPLOYMENT (CLOUD RUN)
-# -------------------------------------------------------------------------
-text_9 = """# @title 🚀 Step 8: Deploy to Cloud Run (Serverless)
-# @markdown We will create a Flask app, package it with Docker, and deploy it to Cloud Run.
-
-import os
-
-# 1. Create Deployment Directory
-os.makedirs("deploy_app", exist_ok=True)
-
-# 2. Write Flask App
-app_code = f\"\"\"
-import os
-import tensorflow as tf
-import tensorflow_recommenders as tfrs
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-
-LOCAL_MODEL_PATH = "/app/model"
-MODEL_GCS_PATH = "{MODEL_SAVE_PATH}"
-
-# Download Model at startup
-print("Downloading model from GCS...")
-os.system(f"gsutil -m cp -r {{MODEL_GCS_PATH}}/* {{LOCAL_MODEL_PATH}}")
-
-print("Loading model...")
-model = tf.saved_model.load(LOCAL_MODEL_PATH)
-
-@app.route('/predict', methods=['POST'])
-def predict():
-    try:
-        data = request.json
-        inputs = {{
-            "customer_id": tf.constant([data['customer_id']]),
-            "age_bin": tf.constant([data['age_bin']]),
-            "month_of_year": tf.constant([data['month_of_year']]),
-            "week_of_month": tf.constant([data['week_of_month']])
-        }}
-        scores, ids = model(inputs)
-        recommendations = [id.decode('utf-8') for id in ids.numpy()[0]]
-        return jsonify({{"recommendations": recommendations}})
-    except Exception as e:
-        return jsonify({{"error": str(e)}}), 500
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080)
-\"\"\"
-
-with open("deploy_app/main.py", "w") as f:
-    f.write(app_code)
-
-# 3. Write Dockerfile
-dockerfile_code = \"\"\"
-FROM python:3.9-slim
-RUN apt-get update && apt-get install -y curl gnupg
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \\
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \\
-    apt-get update -y && apt-get install google-cloud-sdk -y
-WORKDIR /app
-RUN mkdir -p /app/model
-RUN pip install flask gunicorn tensorflow tensorflow-recommenders scann
-COPY main.py .
-CMD exec gunicorn --bind :8080 --workers 1 --threads 8 --timeout 0 main:app
-\"\"\"
-
-with open("deploy_app/Dockerfile", "w") as f:
-    f.write(dockerfile_code)
-
-print("✅ Deployment files generated.")
-
-# 4. Build and Deploy
-IMAGE_NAME = f"gcr.io/{PROJECT_ID}/hm-recommender-app"
-SERVICE_NAME = "hm-recommender-service"
-
-print(f"🔨 Building Container: {IMAGE_NAME}")
-!gcloud builds submit --tag $IMAGE_NAME deploy_app
-
-print(f"🚀 Deploying to Cloud Run: {SERVICE_NAME}")
-!gcloud run deploy $SERVICE_NAME \\
-  --image $IMAGE_NAME \\
-  --platform managed \\
-  --region $REGION \\
-  --allow-unauthenticated \\
-  --memory 2Gi
-
-print("✅ Deployment Complete! Click the URL above to test your API.")
-"""
-cell_9 = nbf.v4.new_code_cell(text_9)
-cell_9.metadata = {"cellView": "form", "id": "deploy_cell"}
 
 
 # Add cells to notebook
-nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8, cell_9])
+nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8])
 
 # Save the file
 with open('hm_two_tower_training.ipynb', 'w') as f:
