@@ -1,0 +1,6 @@
+streamlit
+pandas
+requests
+pyarrow
+google-cloud-storage
+fastparquet
