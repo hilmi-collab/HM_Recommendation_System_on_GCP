@@ -53,17 +53,57 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COM
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/run.admin" > /dev/null 2>&1
 echo -e "${GREEN}✔ Permissions assigned.${NC}"
 
-# 4. RUNTIME
-echo -e "${BLUE}[Step 3/6] Creating Colab Runtime Template...${NC}"
-TEMPLATE_NAME="hm-workshop-gpu-template"
+# 4. RUNTIME TEMPLATES (UPDATED)
+echo -e "${BLUE}[Step 3/6] Creating Colab Runtime Templates...${NC}"
 REGION="us-central1"
 
-if gcloud colab runtime-templates list --region=$REGION --filter="displayName=$TEMPLATE_NAME" --format="value(name)" 2>/dev/null | grep -q "$TEMPLATE_NAME"; then
-    echo -e "${YELLOW}[Info]${NC} Template exists."
-else
-    gcloud colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$TEMPLATE_NAME --machine-type=n1-standard-4 --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > /dev/null 2>&1
-    if [ $? -eq 0 ]; then echo -e "${GREEN}✔ Template created.${NC}"; else echo -e "${YELLOW}[Info] Trying Beta...${NC}"; gcloud beta colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$TEMPLATE_NAME --machine-type=n1-standard-4 --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > /dev/null 2>&1; fi
-fi
+# Fonksiyon: Template oluşturucu (Kod tekrarını önlemek için)
+create_template() {
+    local T_NAME=$1
+    local M_TYPE=$2
+    
+    # Check if exists
+    if gcloud colab runtime-templates list --region=$REGION --filter="displayName=$T_NAME" --format="value(name)" 2>/dev/null | grep -q "$T_NAME"; then
+        echo -e "${YELLOW}[Info]${NC} Template '$T_NAME' already exists. Skipping."
+    else
+        echo -e "Creating template: ${YELLOW}$T_NAME${NC} ($M_TYPE)..."
+        
+        # Try Standard
+        gcloud colab runtime-templates create \
+            --project=$PROJECT_ID \
+            --region=$REGION \
+            --display-name=$T_NAME \
+            --machine-type=$M_TYPE \
+            --accelerator-type=NVIDIA_TESLA_T4 \
+            --accelerator-count=1 > /dev/null 2>&1
+            
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✔ $T_NAME created.${NC}"
+        else
+            # Try Beta (Fallback)
+            echo -e "${YELLOW}[Info] Standard command failed, trying BETA...${NC}"
+            gcloud beta colab runtime-templates create \
+                --project=$PROJECT_ID \
+                --region=$REGION \
+                --display-name=$T_NAME \
+                --machine-type=$M_TYPE \
+                --accelerator-type=NVIDIA_TESLA_T4 \
+                --accelerator-count=1 > /dev/null 2>&1
+                
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✔ $T_NAME created (via Beta).${NC}"
+            else
+                echo -e "${RED}[Error] Failed to create $T_NAME.${NC}"
+            fi
+        fi
+    fi
+}
+
+# 1. Retrieval Template (High RAM - n1-standard-8)
+create_template "hm-retrieval-gpu-template" "n1-standard-8"
+
+# 2. Ranking Template (Standard RAM - n1-standard-4)
+create_template "hm-ranking-gpu-template" "n1-standard-4"
 
 # 5. STORAGE & NOTEBOOKS
 echo -e "${BLUE}[Step 4/6] Setting up Storage & Notebooks...${NC}"
@@ -97,3 +137,7 @@ echo -e "${GREEN}======================================================${NC}"
 echo -e "🚀  **READY**"
 echo -e "Notebooks are in: gs://$BUCKET_NAME/notebooks"
 echo -e "Frontend code is in: ~/hm_frontend"
+echo -e ""
+echo -e "Runtime Templates Created:"
+echo -e "1. ${YELLOW}hm-retrieval-gpu-template${NC} (Use for Two-Tower Model)"
+echo -e "2. ${YELLOW}hm-ranking-gpu-template${NC} (Use for Ranking Model)"
