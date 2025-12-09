@@ -1,10 +1,9 @@
 import nbformat as nbf
 
-# Initialize a new notebook
 nb = nbf.v4.new_notebook()
 
 # -------------------------------------------------------------------------
-# CELL 1: CONFIGURATION (FORM)
+# CELL 1: CONFIGURATION (DÜZELTİLDİ)
 # -------------------------------------------------------------------------
 text_1 = """# @title ⚙️ Workshop Configuration & Setup
 # @markdown Please enter your project details and training parameters below.
@@ -13,50 +12,45 @@ text_1 = """# @title ⚙️ Workshop Configuration & Setup
 import os
 
 # @markdown ### ☁️ Cloud Project Settings
+# @markdown Enter your Project ID here. The bucket name will be generated automatically.
 PROJECT_ID = "your-project-id-here" # @param {type:"string"}
-BUCKET_NAME = "hm-recommendation-workshop" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
+
+# BUCKET NAME AUTOMATION
+# Bash scriptinde oluşturduğumuz standart isimlendirmeyi kullanıyoruz.
+BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
 
 # @markdown ### 🚀 Model Hyperparameters
 EMBEDDING_DIM = 64 # @param {type:"integer"}
 LEARNING_RATE = 0.1 # @param {type:"number"}
-EPOCHS = 5 # @param {type:"slider", min:1, max:10, step:1}
+EPOCHS = 5 # @param {type:"slider", min:1, max:5, step:1}
 
 # @markdown ### 📦 Data Paths (Relative to Bucket)
-# @markdown Do not change these unless your bucket structure is different.
 ARTICLES_FILE = "articles.csv" # @param {type:"string"}
 CUSTOMERS_FILE = "customers.csv" # @param {type:"string"}
 TRANSACTIONS_FILE = "transactions.csv" # @param {type:"string"}
 
 # Setup Environment Variables
 os.environ["GCLOUD_PROJECT"] = PROJECT_ID
-# Important: Use legacy Keras behavior for TF 2.x compatibility with ScaNN
 os.environ["TF_USE_LEGACY_KERAS"] = "1" 
 
 GCS_BASE_PATH = f"gs://{BUCKET_NAME}"
 
 print(f"✅ Configuration set for Project: {PROJECT_ID}")
-print(f"📂 Data Source: {GCS_BASE_PATH}")
-print(f"weights will be saved to: {GCS_BASE_PATH}/models/two-tower-model")
+print(f"📂 Target Bucket: {GCS_BASE_PATH}")
+print(f"💾 Model will be saved to: {GCS_BASE_PATH}/models/two-tower-model")
 """
 cell_1 = nbf.v4.new_code_cell(text_1)
-# Adding metadata to hide the cell code and show the form
 cell_1.metadata = {"cellView": "form", "id": "config_cell"}
 
 # -------------------------------------------------------------------------
 # CELL 2: INSTALLATION
 # -------------------------------------------------------------------------
 text_2 = """# @title 📥 Step 1: Install Libraries
-# @markdown Installing TensorFlow Recommenders, ScaNN, and Datasets.
-# @markdown This may take 1-2 minutes.
-
 import sys
-
-# Install TF-compatible version of ScaNN and other dependencies
 !pip install -q tensorflow-recommenders --no-deps
 !pip install -q --upgrade tensorflow-datasets
 !pip install -q "scann[tf]" tensorflow-recommenders tensorflow-datasets
-
 print("✅ Installation Complete.")
 """
 cell_2 = nbf.v4.new_code_cell(text_2)
@@ -66,8 +60,6 @@ cell_2.metadata = {"cellView": "form", "id": "install_cell"}
 # CELL 3: IMPORTS & DATA LOADING
 # -------------------------------------------------------------------------
 text_3 = """# @title 💾 Step 2: Load Data from Cloud Storage
-# @markdown Reading CSV files directly from your GCS Bucket using the paths defined in configuration.
-
 import os
 import pprint
 import numpy as np
@@ -77,13 +69,12 @@ import tensorflow_recommenders as tfrs
 from typing import Dict, Text, List
 from tensorflow.keras.layers import StringLookup, Embedding, Dense
 
-# GPU Check
 print(f"TensorFlow Version: {tf.__version__}")
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     print(f"🚀 GPU Active: {gpus[0].name}")
 else:
-    print("⚠️ Running on CPU (Training might be slower)")
+    print("⚠️ Running on CPU")
 
 # Paths
 ARTICLES_PATH = os.path.join(GCS_BASE_PATH, ARTICLES_FILE)
@@ -110,7 +101,6 @@ customers_df['age_bin'] = customers_df['age_bin'].cat.add_categories('Unknown').
 print(f"Loading Transactions from: {TRANSACTIONS_PATH}")
 transactions_df = pd.read_csv(TRANSACTIONS_PATH, parse_dates=['t_dat'], dtype={'article_id': str})
 
-# Filter last year data
 val_start_date = pd.to_datetime('2020-09-09')
 train_start_date = val_start_date - pd.DateOffset(years=1)
 train_df = transactions_df[
@@ -118,25 +108,20 @@ train_df = transactions_df[
     (transactions_df['t_dat'] >= train_start_date)
 ].copy()
 
-# Feature Engineering
 train_df['month_of_year'] = train_df['t_dat'].dt.month.astype(str)
 train_df['week_of_month'] = ((train_df['t_dat'].dt.day - 1) // 7 + 1).astype(str)
 interactions_df = train_df[['customer_id', 'article_id', 'month_of_year', 'week_of_month']]
 
 print(f"✅ Training dataset ready: {len(interactions_df)} rows.")
-
-# Clean up RAM
 del transactions_df, train_df
 """
 cell_3 = nbf.v4.new_code_cell(text_3)
 cell_3.metadata = {"cellView": "form", "id": "data_load_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 4: PREPROCESSING & PIPELINE
+# CELL 4: PREPROCESSING
 # -------------------------------------------------------------------------
 text_4 = """# @title 🔧 Step 3: Preprocessing & Lookup Tables
-# @markdown Creating string lookup tables for features (Age, Product Group, Department, etc.)
-
 customer_ids = customers_df['customer_id'].unique()
 article_ids = articles_df['article_id'].unique()
 age_groups = customers_df['age_bin'].unique()
@@ -157,7 +142,6 @@ for col in feature_cols:
         default_value='Unknown'
     )
 
-# Create Datasets
 articles_ds = tf.data.Dataset.from_tensor_slices(dict(articles_df))
 interactions_ds = tf.data.Dataset.from_tensor_slices(dict(interactions_df))
 
@@ -177,20 +161,15 @@ cell_4.metadata = {"cellView": "form", "id": "prep_cell"}
 # CELL 5: MODEL DEFINITION
 # -------------------------------------------------------------------------
 text_5 = """# @title 🧠 Step 4: Define Two-Tower Model
-# @markdown Defining User Tower and Item Tower architectures using TensorFlow Recommenders.
-
 class UserModel(tf.keras.Model):
     def __init__(self):
         super().__init__()
         self.customer_id_lookup = StringLookup(vocabulary=customer_ids, mask_token=None)
         self.customer_id_emb = Embedding(len(customer_ids) + 1, EMBEDDING_DIM)
-        
         self.age_bin_lookup = StringLookup(vocabulary=age_groups, mask_token=None)
         self.age_bin_emb = Embedding(len(age_groups) + 1, EMBEDDING_DIM // 4)
-        
         self.month_lookup = StringLookup(vocabulary=months, mask_token=None)
         self.month_emb = Embedding(len(months) + 1, EMBEDDING_DIM // 4)
-        
         self.week_lookup = StringLookup(vocabulary=weeks, mask_token=None)
         self.week_emb = Embedding(len(weeks) + 1, EMBEDDING_DIM // 4)
         self.projection = Dense(EMBEDDING_DIM)
@@ -209,7 +188,6 @@ class ItemModel(tf.keras.Model):
         super().__init__()
         self.article_id_lookup = StringLookup(vocabulary=article_ids, mask_token=None)
         self.article_id_emb = Embedding(len(article_ids) + 1, EMBEDDING_DIM)
-        
         self.lookups = {}
         self.embeddings = {}
         for col in feature_cols:
@@ -246,15 +224,9 @@ cell_5.metadata = {"cellView": "form", "id": "model_def_cell"}
 # CELL 6: TRAINING
 # -------------------------------------------------------------------------
 text_6 = """# @title 🏋️ Step 5: Train the Model
-# @markdown Training the Two-Tower model with Adagrad optimizer.
-# @markdown *Note: This uses the Epochs and Learning Rate defined in Step 1.*
-
-# Cache data in RAM
 cached_train = interactions_ds.shuffle(100_000).batch(16384).cache().prefetch(tf.data.AUTOTUNE)
-
 model = HMRModel()
 model.compile(optimizer=tf.keras.optimizers.Adagrad(LEARNING_RATE))
-
 print(f"Starting training for {EPOCHS} epochs...")
 history = model.fit(cached_train, epochs=EPOCHS)
 print("✅ Training finished.")
@@ -263,11 +235,9 @@ cell_6 = nbf.v4.new_code_cell(text_6)
 cell_6.metadata = {"cellView": "form", "id": "train_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 7: SCANN INDEXING
+# CELL 7: SCANN INDEX
 # -------------------------------------------------------------------------
 text_7 = """# @title 🔍 Step 6: Build ScaNN Index
-# @markdown Building Approximate Nearest Neighbor index for fast retrieval.
-
 print("Building ScaNN index...")
 scann_index = tfrs.layers.factorized_top_k.ScaNN(
     model.user_model,
@@ -276,12 +246,9 @@ scann_index = tfrs.layers.factorized_top_k.ScaNN(
     num_leaves_to_search=30,
     k=50
 )
-
-# Index all items
 candidate_dataset = articles_ds.batch(2048).map(lambda x: (x["article_id"], model.item_model(x)))
 scann_index.index_from_dataset(candidate_dataset)
 
-# Build check
 sample_query = {
     "customer_id": tf.constant([customer_ids[0]]),
     "age_bin": tf.constant([age_groups[0]]),
@@ -298,8 +265,6 @@ cell_7.metadata = {"cellView": "form", "id": "scann_cell"}
 # CELL 8: SAVE TO GCS
 # -------------------------------------------------------------------------
 text_8 = """# @title 💾 Step 7: Save Model to GCS
-# @markdown Saving the serving-ready model to Google Cloud Storage.
-
 class ServingModel(tf.keras.Model):
     def __init__(self, index_layer):
         super().__init__()
@@ -315,8 +280,9 @@ class ServingModel(tf.keras.Model):
         return self.index_layer(features)
 
 serving_model = ServingModel(scann_index)
-_ = serving_model(sample_query) # Final build check
+_ = serving_model(sample_query)
 
+# MODELİ DOĞRU BUCKET'A KAYDETME
 MODEL_SAVE_PATH = os.path.join(GCS_BASE_PATH, 'models/two-tower-model')
 print(f"Saving model to: {MODEL_SAVE_PATH}")
 tf.saved_model.save(serving_model, MODEL_SAVE_PATH)
@@ -325,13 +291,9 @@ print("✅ Model saved successfully.")
 cell_8 = nbf.v4.new_code_cell(text_8)
 cell_8.metadata = {"cellView": "form", "id": "save_cell"}
 
-
-
-# Add cells to notebook
+# SAVE NOTEBOOK
 nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8])
-
-# Save the file
 with open('hm_two_tower_training.ipynb', 'w') as f:
     nbf.write(nb, f)
 
-print("🎉 'hm_two_tower_training.ipynb' has been successfully created!")
+print("🎉 'hm_two_tower_training.ipynb' updated! It will now save to: gs://hm-workshop-{PROJECT_ID}/models/two-tower-model")

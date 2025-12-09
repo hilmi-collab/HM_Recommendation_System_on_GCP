@@ -3,24 +3,24 @@ import nbformat as nbf
 nb = nbf.v4.new_notebook()
 
 # -------------------------------------------------------------------------
-# CELL 1: CONFIGURATION
+# CELL 1: CONFIGURATION (DÜZELTİLDİ)
 # -------------------------------------------------------------------------
+# BURADAKİ DEĞİŞİKLİK: Bucket ismi artık Project ID'ye göre otomatik oluşuyor.
+# Böylece Two-Tower modelinin kaydedildiği yerle birebir eşleşiyor.
 text_1 = """# @title ⚙️ Ranking Model Configuration
 # @markdown Enter your project details below.
 
 import os
-import gc
-import time
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-import lightgbm as lgb
 from datetime import timedelta
 
 # @markdown ### ☁️ Cloud Project Settings
+# @markdown Enter your Project ID. Bucket name will be auto-generated to match the Setup Script.
 PROJECT_ID = "your-project-id-here" # @param {type:"string"}
-BUCKET_NAME = "hm-recommendation-workshop" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
+
+# BUCKET NAME AUTOMATION (Fix for Path Issues)
+# Setup scriptinde oluşturulan standart ismi kullanıyoruz
+BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
 
 # @markdown ### 🧪 Experiment Settings
 TOP_K_RETRIEVAL = 60 # @param {type:"integer"}
@@ -32,16 +32,20 @@ NUM_ROUNDS = 5000 # @param {type:"integer"}
 # Environment & Paths
 os.environ["GCLOUD_PROJECT"] = PROJECT_ID
 BASE_PATH = f'gs://{BUCKET_NAME}'
-# Output path for artifacts
 ARTIFACTS_PATH = os.path.join(BASE_PATH, 'models/ranking_model') 
 
 # Raw Data Paths
 ARTICLES_PATH = os.path.join(BASE_PATH, 'articles.csv')
 CUSTOMERS_PATH = os.path.join(BASE_PATH, 'customers.csv')
 TRANSACTIONS_PATH = os.path.join(BASE_PATH, 'transactions.csv')
+
+# Two-Tower Model Path (Otomatik Olarak Doğru Yeri Gösterecek)
 RETRIEVAL_MODEL_PATH = os.path.join(BASE_PATH, 'models/two-tower-model')
 
 print(f"✅ Configuration set for Project: {PROJECT_ID}")
+print(f"📂 Target Bucket: {BASE_PATH}")
+print(f"🔍 Retrieval Model Path: {RETRIEVAL_MODEL_PATH}")
+print("⚠️ Please run the next cell to install dependencies.")
 """
 cell_1 = nbf.v4.new_code_cell(text_1)
 cell_1.metadata = {"cellView": "form", "id": "config_cell"}
@@ -49,23 +53,27 @@ cell_1.metadata = {"cellView": "form", "id": "config_cell"}
 # -------------------------------------------------------------------------
 # CELL 2: INSTALLATION
 # -------------------------------------------------------------------------
-text_2 = """# @title 📥 Step 1: Install Dependencies
-# @markdown Installing necessary libraries.
-# @markdown Added `gcsfs` to read directly from GCS via Pandas.
-
+text_2 = """# @title 📥 Step 1: Install Dependencies & Fix Protobuf
 !pip uninstall -y protobuf > /dev/null
 !pip install protobuf==3.20.3 > /dev/null
 !pip install -q tensorflow-recommenders lightgbm pandas numpy gcsfs
-
 print("✅ Installation Complete.")
 """
 cell_2 = nbf.v4.new_code_cell(text_2)
 cell_2.metadata = {"cellView": "form", "id": "install_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 3: UTILS & METRICS
+# CELL 3: IMPORTS
 # -------------------------------------------------------------------------
-text_3 = """# @title 🛠️ Step 2: Helper Functions (MAP@12)
+text_3 = """# @title 📚 Step 2: Import Libraries
+import gc
+import time
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import lightgbm as lgb
+import tensorflow_recommenders as tfrs
+
 def apk(actual, predicted, k=10):
     if len(predicted) > k: predicted = predicted[:k]
     score = 0.0
@@ -80,38 +88,31 @@ def apk(actual, predicted, k=10):
 def mapk(actual, predicted, k=10):
     return np.mean([apk(a, p, k) for a, p in zip(actual, predicted)])
 
-print("✅ Metric functions defined.")
+print(f"TensorFlow Version: {tf.__version__}")
+print("✅ Libraries Imported.")
 """
 cell_3 = nbf.v4.new_code_cell(text_3)
-cell_3.metadata = {"cellView": "form", "id": "metrics_cell"}
+cell_3.metadata = {"cellView": "form", "id": "imports_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 4: DATA LOADING (TRAINING)
+# CELL 4: STATIC DATA
 # -------------------------------------------------------------------------
-text_4 = """# @title 💾 Step 3: Load Static Data (Training)
-# @markdown Loading Articles and Customers for training process.
-
+text_4 = """# @title 💾 Step 3: Load Static Data
 def load_static_data():
-    print(">>> Loading Static Data (Articles & Customers)...")
-    
-    # 1. Articles
+    print(">>> Loading Static Data...")
     cols = ['article_id', 'product_code', 'product_type_name', 'product_group_name',
             'graphical_appearance_no', 'colour_group_code', 'section_no', 'garment_group_no']
     articles = pd.read_csv(ARTICLES_PATH, dtype={'article_id': str}, usecols=cols)
-    
     for c in cols:
         if c != 'article_id': articles[c] = pd.factorize(articles[c].astype(str), sort=True)[0]
 
     articles['article_id_int'], _ = pd.factorize(articles['article_id'], sort=True)
     article_map = dict(zip(articles['article_id'], articles['article_id_int']))
-    
     articles['article_id'] = articles['article_id_int']
     del articles['article_id_int']
 
-    # 2. Customers
     cust_cols = ['customer_id', 'FN', 'Active', 'age', 'club_member_status']
     customers = pd.read_csv(CUSTOMERS_PATH, usecols=cust_cols, dtype={'customer_id': str})
-    
     customers['FN'] = customers['FN'].fillna(0)
     customers['Active'] = customers['Active'].fillna(0)
     customers['age'] = customers['age'].fillna(customers['age'].mean())
@@ -125,21 +126,18 @@ def load_static_data():
     return articles, customers, article_map, customer_map
 
 articles_df, customers_df, article_map, customer_map = load_static_data()
-print("✅ Static data loaded and mapped.")
+print("✅ Static data loaded.")
 """
 cell_4 = nbf.v4.new_code_cell(text_4)
 cell_4.metadata = {"cellView": "form", "id": "load_static_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 5: DATA GENERATION ENGINE
+# CELL 5: DATA ENGINE
 # -------------------------------------------------------------------------
 text_5 = """# @title 🏭 Step 4: Data Generation Engine
-# @markdown Helper function to generate candidate datasets using Two-Tower retrieval.
-
 def generate_weekly_data(target_start_date, df_trans, tf_model, is_training=True):
     history_cutoff = target_start_date
     target_end_date = target_start_date + timedelta(days=7)
-    
     df_history = df_trans[df_trans['t_dat'] < history_cutoff]
 
     if is_training:
@@ -151,7 +149,6 @@ def generate_weekly_data(target_start_date, df_trans, tf_model, is_training=True
 
     if len(target_users) == 0: return None
 
-    # Popularity & Stats
     last_week_start = history_cutoff - timedelta(days=7)
     df_last_week = df_history[df_history['t_dat'] > last_week_start]
     item_trend_score = df_last_week.groupby('article_id').size().reset_index(name='trend_score')
@@ -159,14 +156,12 @@ def generate_weekly_data(target_start_date, df_trans, tf_model, is_training=True
     hist_age = df_history[['article_id', 'customer_id']].merge(customers_df[['customer_id', 'age']], on='customer_id')
     item_avg_age = hist_age.groupby('article_id')['age'].mean().reset_index(name='item_avg_age')
 
-    # Candidates
     top_items = item_trend_score.sort_values('trend_score', ascending=False).head(12)['article_id'].tolist()
     
     repurchase_start = history_cutoff - timedelta(days=28)
     df_rep = df_history[(df_history['t_dat'] > repurchase_start) & (df_history['customer_id'].isin(target_users))]
     user_history = df_rep.groupby('customer_id')['article_id'].apply(lambda x: list(set(x))).to_dict()
 
-    # Retrieval
     inv_cust_map = {v: k for k, v in customer_map.items()}
     tf_cands_dict = {}
     tf_scores_dict = {}
@@ -177,7 +172,6 @@ def generate_weekly_data(target_start_date, df_trans, tf_model, is_training=True
     for i in range(0, len(tgt_list), BATCH):
         batch_uids = tgt_list[i:i+BATCH]
         batch_strs = [inv_cust_map[u] for u in batch_uids]
-        
         inp = {
             "customer_id": tf.constant(batch_strs),
             "age_bin": tf.constant(["25"]*len(batch_strs)),
@@ -200,7 +194,6 @@ def generate_weekly_data(target_start_date, df_trans, tf_model, is_training=True
             tf_cands_dict[u] = c_list
             tf_scores_dict[u] = s_map
 
-    # Merge
     data = []
     for u in target_users:
         candidates = set()
@@ -227,7 +220,6 @@ def generate_weekly_data(target_start_date, df_trans, tf_model, is_training=True
             neg = neg.sample(n=1_500_000, random_state=42)
         df_week = pd.concat([pos, neg])
 
-    # Features
     df_week = df_week.merge(item_trend_score, on='article_id', how='left').fillna({'trend_score': 0})
     df_week = df_week.merge(customers_df[['customer_id', 'age']], on='customer_id', how='left')
     df_week = df_week.merge(item_avg_age, on='article_id', how='left')
@@ -245,11 +237,9 @@ cell_5 = nbf.v4.new_code_cell(text_5)
 cell_5.metadata = {"cellView": "form", "id": "data_engine_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 6: TRAINING LOOP
+# CELL 6: TRAINING (İndirme Kısmı)
 # -------------------------------------------------------------------------
 text_6 = """# @title 🏋️ Step 5: Train LightGBM Model
-# @markdown Loads transactions, prepares data, and trains the LightGBM Ranker.
-
 print(">>> Loading Transactions...")
 df_trans = pd.read_csv(TRANSACTIONS_PATH, dtype={'article_id': str, 'customer_id': str}, parse_dates=['t_dat'])
 df_trans['article_id'] = df_trans['article_id'].map(article_map).fillna(-1).astype('int32')
@@ -257,9 +247,15 @@ df_trans['customer_id'] = df_trans['customer_id'].map(customer_map).fillna(-1).a
 df_trans = df_trans[(df_trans['article_id'] != -1) & (df_trans['customer_id'] != -1)]
 
 print(">>> Loading Retrieval Model...")
+# Cell 1'de otomatik oluşturulan RETRIEVAL_MODEL_PATH kullanılıyor
 if not os.path.exists("two-tower-model"):
-    os.system(f"gsutil -m cp -r {RETRIEVAL_MODEL_PATH} two-tower-model")
-tf_model = tf.saved_model.load("two-tower-model")
+    print(f"Downloading from: {RETRIEVAL_MODEL_PATH}")
+    os.system(f"gsutil -m cp -r {RETRIEVAL_MODEL_PATH} two-tower-model") 
+
+if os.path.exists("two-tower-model/two-tower-model"):
+    tf_model = tf.saved_model.load("two-tower-model/two-tower-model")
+else:
+    tf_model = tf.saved_model.load("two-tower-model")
 
 print(f"Generating training data for {NUM_TRAIN_WEEKS} weeks...")
 VAL_WEEK_START = pd.to_datetime('2020-09-16')
@@ -305,7 +301,6 @@ print(">>> Starting Training...")
 model = lgb.train(params, train_set, num_boost_round=NUM_ROUNDS)
 model.save_model("model.model")
 
-# Evaluate
 print(">>> Evaluating...")
 eval_df = generate_weekly_data(VAL_WEEK_START, df_trans, tf_model, is_training=False)
 model_features = model.feature_name()
@@ -326,28 +321,18 @@ map_scores = [apk(ground_truth[uid], preds_map[uid], k=12) if uid in preds_map e
 final_map = np.mean(map_scores)
 print(f"🎉 FINAL MAP@12 SCORE: {final_map:.5f}")
 
-# Upload Model
 print(f"Uploading model to {ARTIFACTS_PATH}...")
 os.system(f"gsutil cp model.model {ARTIFACTS_PATH}/model.model")
-
 print("✅ Training and Evaluation complete.")
 """
 cell_6 = nbf.v4.new_code_cell(text_6)
 cell_6.metadata = {"cellView": "form", "id": "train_eval_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 7: PREPARE SERVING ARTIFACTS (NEW STEP)
+# CELL 7: PREPARE SERVING ARTIFACTS
 # -------------------------------------------------------------------------
 text_7 = """# @title 📦 Step 6: Prepare & Upload Serving Artifacts
-# @markdown This step processes the raw data into optimized Parquet files for the Serving API.
-# @markdown It generates:
-# @markdown * `app_articles.parquet` (Product details + Images)
-# @markdown * `app_customers.parquet` (User details)
-# @markdown * `app_user_history.parquet` (User's recent purchases)
-# @markdown * `app_stats.parquet` (Trending items)
-
 def generate_image_url(article_id):
-    # Hopsworks logic
     article_id_str = str(article_id)
     if len(article_id_str) == 9:
         article_id_str = "0" + article_id_str
@@ -358,11 +343,9 @@ print("1. Processing Articles for Serving...")
 df_articles = pd.read_csv(ARTICLES_PATH, dtype={'article_id': str})
 df_articles['image_url'] = df_articles['article_id'].apply(generate_image_url)
 
-# Add missing serving cols
 if 'trend_score' not in df_articles.columns: df_articles['trend_score'] = 0.5 
 if 'item_avg_age' not in df_articles.columns: df_articles['item_avg_age'] = 30.0
 
-# Optimize types
 for col in df_articles.select_dtypes(include=['object']).columns:
     if col not in ['article_id', 'prod_name', 'image_url', 'detail_desc']:
         df_articles[col] = df_articles[col].astype('category')
@@ -378,7 +361,6 @@ df_customers.to_parquet('app_customers.parquet', index=False)
 print("   -> app_customers.parquet created.")
 
 print("3. Processing User History (Last 28 Days)...")
-# Re-read transactions with original string IDs for serving mapping
 df_tr = pd.read_csv(TRANSACTIONS_PATH, usecols=['t_dat', 'customer_id', 'article_id'],
                  dtype={'article_id': str, 'customer_id': str},
                  parse_dates=['t_dat'])
@@ -396,20 +378,16 @@ val_df[['customer_id', 'article_id']].to_parquet('val_truth.parquet', index=Fals
 print("   -> val_truth.parquet created.")
 
 print("5. Generating Stats (Trending Items)...")
-# Calculate trending items from the last week of training data
 last_week_start = VAL_START - timedelta(days=7)
 df_trend = df_tr[(df_tr['t_dat'] >= last_week_start) & (df_tr['t_dat'] < VAL_START)]
 item_stats = df_trend.groupby('article_id').size().reset_index(name='trend_score')
-# Simple age proxy
 item_stats['item_avg_age'] = 30.0 
 item_stats.to_parquet('app_stats.parquet', index=False)
 print("   -> app_stats.parquet created.")
 
-# --- UPLOAD ---
 print(f"Uploading all serving artifacts to {ARTIFACTS_PATH}...")
 os.system(f"gsutil cp app_*.parquet {ARTIFACTS_PATH}/")
 os.system(f"gsutil cp val_truth.parquet {ARTIFACTS_PATH}/")
-
 print("✅ Serving artifacts are ready in GCS.")
 """
 cell_7 = nbf.v4.new_code_cell(text_7)
@@ -419,12 +397,8 @@ cell_7.metadata = {"cellView": "form", "id": "prep_serving_cell"}
 # CELL 8: DEPLOYMENT (CLOUD RUN)
 # -------------------------------------------------------------------------
 text_8 = """# @title 🚀 Step 7: Deploy Hybrid System to Cloud Run
-# @markdown We will deploy the full Hybrid System (Two-Tower Retrieval + LightGBM Ranking).
-# @markdown The app will automatically download the Parquet files we just created.
-
 import os
 
-# 1. Create Deployment Directory
 os.makedirs("deploy_app", exist_ok=True)
 
 # 2. Write FastAPI App (main.py)
@@ -440,13 +414,12 @@ import contextlib
 import traceback
 import gc
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (Dynamically injected) ---
 BUCKET_NAME = '{BUCKET_NAME}' 
 GCS_BASE = f'gs://{{BUCKET_NAME}}'
 ARTIFACTS_PATH = f'{{GCS_BASE}}/models/ranking_model'
 TF_PATH = f'{{GCS_BASE}}/models/two-tower-model'
 
-# These match exactly what we created in Step 6
 PARQUET_FILES = [
     'app_articles.parquet',
     'app_customers.parquet',
@@ -462,36 +435,28 @@ TOP_K_TREND = 12
 async def lifespan(app: FastAPI):
     print(">>> [INIT] Starting up...")
     try:
-        # --- A. DOWNLOAD ARTIFACTS ---
         print(">>> [DOWNLOAD] Downloading artifacts...")
-        
-        # 1. Download Parquet Files from Artifacts Path
         for p_file in PARQUET_FILES:
             src = f"{{ARTIFACTS_PATH}}/{{p_file}}"
             os.system(f"gsutil cp {{src}} .")
 
-        # 2. Download LightGBM Model
         if not os.path.exists("model.model"):
             os.system(f"gsutil cp {{ARTIFACTS_PATH}}/model.model model.model")
 
-        # 3. Download Two-Tower Model
         if not os.path.exists("two-tower-model"):
             os.system(f"gsutil -m cp -r {{TF_PATH}} two-tower-model")
 
-        # --- B. LOAD DATA ---
         print(">>> [LOAD] Loading Parquet files...")
         if os.path.exists('app_articles.parquet'):
             data['articles'] = pd.read_parquet('app_articles.parquet')
             data['customers'] = pd.read_parquet('app_customers.parquet')
             
-            # History Map
             if os.path.exists('app_user_history.parquet'):
                 h_df = pd.read_parquet('app_user_history.parquet')
                 data['user_history_map'] = dict(zip(h_df['customer_id'], h_df['article_ids']))
             else:
                 data['user_history_map'] = {{}}
 
-            # Stats & Trends
             if os.path.exists('app_stats.parquet'):
                 stats = pd.read_parquet('app_stats.parquet')
                 data['stats'] = stats
@@ -500,13 +465,10 @@ async def lifespan(app: FastAPI):
                 data['stats'] = pd.DataFrame()
                 data['top_trend_items'] = []
 
-            # Mapping for LightGBM (String ID -> Int ID)
-            # We recreate mapping on the fly to ensure consistency
             print(">>> [MAP] Creating ID mappings...")
             data['articles']['article_id_idx'], _ = pd.factorize(data['articles']['article_id'], sort=True)
             data['article_map'] = dict(zip(data['articles']['article_id'], data['articles']['article_id_idx']))
             
-            # Map Stats
             if not data['stats'].empty:
                 data['stats']['article_id_idx'] = data['stats']['article_id'].map(data['article_map'])
                 data['stats'] = data['stats'].dropna().rename(columns={{'trend_score': 'stat_trend', 'item_avg_age': 'stat_age'}})
@@ -516,7 +478,6 @@ async def lifespan(app: FastAPI):
         else:
             print("!!! [CRITICAL] Parquet files missing.")
 
-        # --- C. LOAD MODELS ---
         print(">>> [MODELS] Loading models...")
         if os.path.exists("model.model"):
             models['lgb'] = lgb.Booster(model_file="model.model")
@@ -548,10 +509,8 @@ async def predict(req: RecRequest):
         candidates = set()
         
         # 1. CANDIDATES
-        # A. Trends
         if 'top_trend_items' in data: candidates.update(data['top_trend_items'])
         
-        # B. Two-Tower
         try:
             if 'tf' in models:
                 inp = {{
@@ -564,13 +523,11 @@ async def predict(req: RecRequest):
                 candidates.update(tf_res)
         except: pass
 
-        # C. User History
         if 'user_history_map' in data and user_id in data['user_history_map']:
             past_items = data['user_history_map'][user_id]
             if isinstance(past_items, (np.ndarray, list)): candidates.update(past_items)
             else: candidates.add(str(past_items))
             
-        # D. Session History
         if req.history: candidates.update(req.history)
 
         if not candidates: return {{"recommendations": []}}
@@ -589,9 +546,6 @@ async def predict(req: RecRequest):
 
         cand_df = pd.DataFrame({{'article_id': valid_cands, 'article_id_idx': valid_idxs}})
         
-        # Merge Features
-        # Note: In serving we optimize by merging only necessary columns
-        # Assuming data['articles'] has static features
         cand_df = cand_df.merge(data['articles'], on='article_id', how='left')
         if 'stats' in data and not data['stats'].empty:
             cand_df = cand_df.merge(data['stats'], on='article_id_idx', how='left')
@@ -599,7 +553,6 @@ async def predict(req: RecRequest):
         cand_df['trend_score'] = cand_df.get('stat_trend', 0.0).fillna(0)
         cand_df['item_avg_age'] = cand_df.get('stat_age', 30.0).fillna(30.0)
         
-        # User Features (Simple lookup)
         cust_df = data['customers']
         if user_id in cust_df['customer_id'].values:
             u_row = cust_df[cust_df['customer_id'] == user_id].iloc[0]
@@ -622,7 +575,6 @@ async def predict(req: RecRequest):
         else:
             cand_df['score'] = cand_df['trend_score']
 
-        # 4. RESPONSE
         top_recs = cand_df.sort_values('score', ascending=False).head(12)
         results = []
         for _, row in top_recs.iterrows():
@@ -687,4 +639,4 @@ nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8]
 with open('hm_ranking_lightgbm_training.ipynb', 'w') as f:
     nbf.write(nb, f)
 
-print("🎉 'hm_ranking_lightgbm_training.ipynb' updated with data preparation steps!")
+print("🎉 'hm_ranking_lightgbm_training.ipynb' updated with dynamic paths!")
