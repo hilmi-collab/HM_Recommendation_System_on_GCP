@@ -3,24 +3,34 @@ import nbformat as nbf
 nb = nbf.v4.new_notebook()
 
 # -------------------------------------------------------------------------
-# CELL 1: CONFIGURATION (DÜZELTİLDİ)
+# CELL 1: CONFIGURATION (DATA & WORK BUCKET AYRIMI)
 # -------------------------------------------------------------------------
-# BURADAKİ DEĞİŞİKLİK: Bucket ismi artık Project ID'ye göre otomatik oluşuyor.
-# Böylece Two-Tower modelinin kaydedildiği yerle birebir eşleşiyor.
 text_1 = """# @title ⚙️ Ranking Model Configuration
-# @markdown Enter your project details below.
-
 import os
 from datetime import timedelta
 
-# @markdown ### ☁️ Cloud Project Settings
-# @markdown Enter your Project ID. Bucket name will be auto-generated to match the Setup Script.
+# @markdown ### ☁️ Project Settings
 PROJECT_ID = "your-project-id-here" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
 
-# BUCKET NAME AUTOMATION (Fix for Path Issues)
-# Setup scriptinde oluşturulan standart ismi kullanıyoruz
-BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
+# 1. PUBLIC DATA BUCKET (Read-Only)
+DATA_BUCKET_NAME = "hm-recommendation-workshop"
+DATA_GCS_PATH = f"gs://{DATA_BUCKET_NAME}"
+
+# 2. PRIVATE WORK BUCKET (Write)
+WORK_BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
+WORK_GCS_PATH = f"gs://{WORK_BUCKET_NAME}"
+
+# ARTIFACTS PATH (Work Bucket'ta)
+ARTIFACTS_PATH = os.path.join(WORK_GCS_PATH, 'models/ranking_model') 
+
+# INPUT DATA PATHS (Data Bucket'ta)
+ARTICLES_PATH = os.path.join(DATA_GCS_PATH, 'articles.csv')
+CUSTOMERS_PATH = os.path.join(DATA_GCS_PATH, 'customers.csv')
+TRANSACTIONS_PATH = os.path.join(DATA_GCS_PATH, 'transactions.csv')
+
+# TWO-TOWER MODEL PATH (Work Bucket'ta - Az önce eğittiğimiz yer)
+RETRIEVAL_MODEL_PATH = os.path.join(WORK_GCS_PATH, 'models/two-tower-model')
 
 # @markdown ### 🧪 Experiment Settings
 TOP_K_RETRIEVAL = 60 # @param {type:"integer"}
@@ -29,22 +39,12 @@ LEARNING_RATE = 0.005 # @param {type:"number"}
 NUM_LEAVES = 255 # @param {type:"integer"}
 NUM_ROUNDS = 5000 # @param {type:"integer"}
 
-# Environment & Paths
 os.environ["GCLOUD_PROJECT"] = PROJECT_ID
-BASE_PATH = f'gs://{BUCKET_NAME}'
-ARTIFACTS_PATH = os.path.join(BASE_PATH, 'models/ranking_model') 
 
-# Raw Data Paths
-ARTICLES_PATH = os.path.join(BASE_PATH, 'articles.csv')
-CUSTOMERS_PATH = os.path.join(BASE_PATH, 'customers.csv')
-TRANSACTIONS_PATH = os.path.join(BASE_PATH, 'transactions.csv')
-
-# Two-Tower Model Path (Otomatik Olarak Doğru Yeri Gösterecek)
-RETRIEVAL_MODEL_PATH = os.path.join(BASE_PATH, 'models/two-tower-model')
-
-print(f"✅ Configuration set for Project: {PROJECT_ID}")
-print(f"📂 Target Bucket: {BASE_PATH}")
-print(f"🔍 Retrieval Model Path: {RETRIEVAL_MODEL_PATH}")
+print(f"✅ Config Set:")
+print(f"   📥 Raw Data: {DATA_GCS_PATH}")
+print(f"   🔍 Retrieval Model: {RETRIEVAL_MODEL_PATH}")
+print(f"   💾 Ranking Model Output: {ARTIFACTS_PATH}")
 print("⚠️ Please run the next cell to install dependencies.")
 """
 cell_1 = nbf.v4.new_code_cell(text_1)
@@ -237,7 +237,7 @@ cell_5 = nbf.v4.new_code_cell(text_5)
 cell_5.metadata = {"cellView": "form", "id": "data_engine_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 6: TRAINING (İndirme Kısmı)
+# CELL 6: TRAINING (RETRIEVAL_MODEL_PATH Kullanımı)
 # -------------------------------------------------------------------------
 text_6 = """# @title 🏋️ Step 5: Train LightGBM Model
 print(">>> Loading Transactions...")
@@ -247,7 +247,7 @@ df_trans['customer_id'] = df_trans['customer_id'].map(customer_map).fillna(-1).a
 df_trans = df_trans[(df_trans['article_id'] != -1) & (df_trans['customer_id'] != -1)]
 
 print(">>> Loading Retrieval Model...")
-# Cell 1'de otomatik oluşturulan RETRIEVAL_MODEL_PATH kullanılıyor
+# Model kullanıcının kendi WORK bucket'ından indirilecek
 if not os.path.exists("two-tower-model"):
     print(f"Downloading from: {RETRIEVAL_MODEL_PATH}")
     os.system(f"gsutil -m cp -r {RETRIEVAL_MODEL_PATH} two-tower-model") 
@@ -394,7 +394,7 @@ cell_7 = nbf.v4.new_code_cell(text_7)
 cell_7.metadata = {"cellView": "form", "id": "prep_serving_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 8: DEPLOYMENT (CLOUD RUN)
+# CELL 8: DEPLOYMENT (CLOUD RUN - KULLANICI BUCKETI)
 # -------------------------------------------------------------------------
 text_8 = """# @title 🚀 Step 7: Deploy Hybrid System to Cloud Run
 import os
@@ -414,8 +414,8 @@ import contextlib
 import traceback
 import gc
 
-# --- CONFIGURATION (Dynamically injected) ---
-BUCKET_NAME = '{BUCKET_NAME}' 
+# --- CONFIGURATION (Private Work Bucket) ---
+BUCKET_NAME = '{WORK_BUCKET_NAME}' 
 GCS_BASE = f'gs://{{BUCKET_NAME}}'
 ARTIFACTS_PATH = f'{{GCS_BASE}}/models/ranking_model'
 TF_PATH = f'{{GCS_BASE}}/models/two-tower-model'
@@ -435,7 +435,7 @@ TOP_K_TREND = 12
 async def lifespan(app: FastAPI):
     print(">>> [INIT] Starting up...")
     try:
-        print(">>> [DOWNLOAD] Downloading artifacts...")
+        print(">>> [DOWNLOAD] Downloading artifacts from User Bucket...")
         for p_file in PARQUET_FILES:
             src = f"{{ARTIFACTS_PATH}}/{{p_file}}"
             os.system(f"gsutil cp {{src}} .")
@@ -633,10 +633,9 @@ print("✅ Deployment Complete! Check the URL.")
 cell_8 = nbf.v4.new_code_cell(text_8)
 cell_8.metadata = {"cellView": "form", "id": "deploy_cell"}
 
-# Add all cells
 nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8])
 
 with open('hm_ranking_lightgbm_training.ipynb', 'w') as f:
     nbf.write(nb, f)
 
-print("🎉 'hm_ranking_lightgbm_training.ipynb' updated with dynamic paths!")
+print("🎉 'hm_ranking_lightgbm_training.ipynb' updated (Hybrid Data Mode)!")

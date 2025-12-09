@@ -3,42 +3,39 @@ import nbformat as nbf
 nb = nbf.v4.new_notebook()
 
 # -------------------------------------------------------------------------
-# CELL 1: CONFIGURATION (DÜZELTİLDİ)
+# CELL 1: CONFIGURATION (DATA & WORK BUCKET AYRIMI)
 # -------------------------------------------------------------------------
-text_1 = """# @title ⚙️ Workshop Configuration & Setup
-# @markdown Please enter your project details and training parameters below.
-# @markdown ---
+text_1 = """# @title ⚙️ Workshop Configuration
+# @markdown Please enter your Project ID.
 
 import os
 
-# @markdown ### ☁️ Cloud Project Settings
-# @markdown Enter your Project ID here. The bucket name will be generated automatically.
+# @markdown ### ☁️ Project Settings
 PROJECT_ID = "your-project-id-here" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
 
-# BUCKET NAME AUTOMATION
-# Bash scriptinde oluşturduğumuz standart isimlendirmeyi kullanıyoruz.
-BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
+# 1. PUBLIC DATA BUCKET (Read-Only)
+# Ham veriler (CSV) buradan okunacak.
+DATA_BUCKET_NAME = "hm-recommendation-workshop"
+DATA_GCS_PATH = f"gs://{DATA_BUCKET_NAME}"
+
+# 2. PRIVATE WORK BUCKET (Write)
+# Eğitilen modeller buraya kaydedilecek.
+WORK_BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
+WORK_GCS_PATH = f"gs://{WORK_BUCKET_NAME}"
 
 # @markdown ### 🚀 Model Hyperparameters
 EMBEDDING_DIM = 64 # @param {type:"integer"}
 LEARNING_RATE = 0.1 # @param {type:"number"}
-EPOCHS = 5 # @param {type:"slider", min:1, max:5, step:1}
+EPOCHS = 5 # @param {type:"slider", min:1, max:10, step:1}
 
-# @markdown ### 📦 Data Paths (Relative to Bucket)
-ARTICLES_FILE = "articles.csv" # @param {type:"string"}
-CUSTOMERS_FILE = "customers.csv" # @param {type:"string"}
-TRANSACTIONS_FILE = "transactions.csv" # @param {type:"string"}
-
-# Setup Environment Variables
+# Setup Environment
 os.environ["GCLOUD_PROJECT"] = PROJECT_ID
 os.environ["TF_USE_LEGACY_KERAS"] = "1" 
 
-GCS_BASE_PATH = f"gs://{BUCKET_NAME}"
-
-print(f"✅ Configuration set for Project: {PROJECT_ID}")
-print(f"📂 Target Bucket: {GCS_BASE_PATH}")
-print(f"💾 Model will be saved to: {GCS_BASE_PATH}/models/two-tower-model")
+print(f"✅ Config Set:")
+print(f"   📥 Reading Data from: {DATA_GCS_PATH}")
+print(f"   💾 Saving Models to:  {WORK_GCS_PATH}/models/two-tower-model")
 """
 cell_1 = nbf.v4.new_code_cell(text_1)
 cell_1.metadata = {"cellView": "form", "id": "config_cell"}
@@ -47,7 +44,6 @@ cell_1.metadata = {"cellView": "form", "id": "config_cell"}
 # CELL 2: INSTALLATION
 # -------------------------------------------------------------------------
 text_2 = """# @title 📥 Step 1: Install Libraries
-import sys
 !pip install -q tensorflow-recommenders --no-deps
 !pip install -q --upgrade tensorflow-datasets
 !pip install -q "scann[tf]" tensorflow-recommenders tensorflow-datasets
@@ -57,11 +53,10 @@ cell_2 = nbf.v4.new_code_cell(text_2)
 cell_2.metadata = {"cellView": "form", "id": "install_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 3: IMPORTS & DATA LOADING
+# CELL 3: IMPORTS & DATA LOADING (PUBLIC BUCKET'TAN OKUMA)
 # -------------------------------------------------------------------------
-text_3 = """# @title 💾 Step 2: Load Data from Cloud Storage
+text_3 = """# @title 💾 Step 2: Load Data from Public Bucket
 import os
-import pprint
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -70,16 +65,11 @@ from typing import Dict, Text, List
 from tensorflow.keras.layers import StringLookup, Embedding, Dense
 
 print(f"TensorFlow Version: {tf.__version__}")
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    print(f"🚀 GPU Active: {gpus[0].name}")
-else:
-    print("⚠️ Running on CPU")
 
-# Paths
-ARTICLES_PATH = os.path.join(GCS_BASE_PATH, ARTICLES_FILE)
-CUSTOMERS_PATH = os.path.join(GCS_BASE_PATH, CUSTOMERS_FILE)
-TRANSACTIONS_PATH = os.path.join(GCS_BASE_PATH, TRANSACTIONS_FILE)
+# Paths (Reading from DATA_GCS_PATH)
+ARTICLES_PATH = os.path.join(DATA_GCS_PATH, 'articles.csv')
+CUSTOMERS_PATH = os.path.join(DATA_GCS_PATH, 'customers.csv')
+TRANSACTIONS_PATH = os.path.join(DATA_GCS_PATH, 'transactions.csv')
 
 # --- 1. Load Articles ---
 print(f"Loading Articles from: {ARTICLES_PATH}")
@@ -121,7 +111,7 @@ cell_3.metadata = {"cellView": "form", "id": "data_load_cell"}
 # -------------------------------------------------------------------------
 # CELL 4: PREPROCESSING
 # -------------------------------------------------------------------------
-text_4 = """# @title 🔧 Step 3: Preprocessing & Lookup Tables
+text_4 = """# @title 🔧 Step 3: Preprocessing
 customer_ids = customers_df['customer_id'].unique()
 article_ids = articles_df['article_id'].unique()
 age_groups = customers_df['age_bin'].unique()
@@ -152,7 +142,7 @@ def add_features(features):
     return features
 
 interactions_ds = interactions_ds.map(add_features, num_parallel_calls=tf.data.AUTOTUNE)
-print("✅ Lookup tables and pipelines created.")
+print("✅ Lookup tables created.")
 """
 cell_4 = nbf.v4.new_code_cell(text_4)
 cell_4.metadata = {"cellView": "form", "id": "prep_cell"}
@@ -238,7 +228,6 @@ cell_6.metadata = {"cellView": "form", "id": "train_cell"}
 # CELL 7: SCANN INDEX
 # -------------------------------------------------------------------------
 text_7 = """# @title 🔍 Step 6: Build ScaNN Index
-print("Building ScaNN index...")
 scann_index = tfrs.layers.factorized_top_k.ScaNN(
     model.user_model,
     num_reordering_candidates=500,
@@ -262,9 +251,9 @@ cell_7 = nbf.v4.new_code_cell(text_7)
 cell_7.metadata = {"cellView": "form", "id": "scann_cell"}
 
 # -------------------------------------------------------------------------
-# CELL 8: SAVE TO GCS
+# CELL 8: SAVE TO WORK BUCKET (WORK_GCS_PATH)
 # -------------------------------------------------------------------------
-text_8 = """# @title 💾 Step 7: Save Model to GCS
+text_8 = """# @title 💾 Step 7: Save Model to User Bucket
 class ServingModel(tf.keras.Model):
     def __init__(self, index_layer):
         super().__init__()
@@ -282,8 +271,8 @@ class ServingModel(tf.keras.Model):
 serving_model = ServingModel(scann_index)
 _ = serving_model(sample_query)
 
-# MODELİ DOĞRU BUCKET'A KAYDETME
-MODEL_SAVE_PATH = os.path.join(GCS_BASE_PATH, 'models/two-tower-model')
+# MODELİ PRIVATE WORK BUCKET'A KAYDETME
+MODEL_SAVE_PATH = os.path.join(WORK_GCS_PATH, 'models/two-tower-model')
 print(f"Saving model to: {MODEL_SAVE_PATH}")
 tf.saved_model.save(serving_model, MODEL_SAVE_PATH)
 print("✅ Model saved successfully.")
@@ -291,9 +280,8 @@ print("✅ Model saved successfully.")
 cell_8 = nbf.v4.new_code_cell(text_8)
 cell_8.metadata = {"cellView": "form", "id": "save_cell"}
 
-# SAVE NOTEBOOK
 nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8])
 with open('hm_two_tower_training.ipynb', 'w') as f:
     nbf.write(nb, f)
 
-print("🎉 'hm_two_tower_training.ipynb' updated! It will now save to: gs://hm-workshop-{PROJECT_ID}/models/two-tower-model")
+print("🎉 'hm_two_tower_training.ipynb' updated (Hybrid Data Mode)!")
