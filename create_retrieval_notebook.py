@@ -51,7 +51,7 @@ def create_notebook():
 import os
 
 # @markdown ### ☁️ Project Settings
-PROJECT_ID = "ace-team-hilmi-service" # @param {type:"string"}
+PROJECT_ID = "YOUR_PROJECT_ID" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
 
 # 1. PUBLIC DATA BUCKET (Read-Only)
@@ -294,7 +294,7 @@ print("✅ Model saved successfully.")"""
     with open('hm_two_tower_training.ipynb', 'w', encoding='utf-8') as f:
         json.dump(notebook, f, indent=2, ensure_ascii=False)
 
-    print("Successfully created 'hm_two_tower_training_english.ipynb'.")
+    print("Successfully created 'hm_two_tower_training.ipynb'.")
 
 if __name__ == "__main__":
     create_notebook()

@@ -50,7 +50,7 @@ import os
 from datetime import timedelta
 
 # @markdown ### ☁️ Project Settings
-PROJECT_ID = "ace-team-hilmi-service" # @param {type:"string"}
+PROJECT_ID = "YOUR_PROJECT_ID" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
 
 # 1. PUBLIC DATA BUCKET (Read-Only)
