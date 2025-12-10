@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# H&M RECOMMENDATION WORKSHOP - SETUP SCRIPT
+# H&M RECOMMENDATION WORKSHOP - SETUP SCRIPT (HIGH PERFORMANCE)
 # ==============================================================================
 
 GREEN='\033[0;32m'
@@ -11,6 +11,7 @@ NC='\033[0m'
 
 # 🔧 CONFIGURATION
 GITHUB_BASE_URL="https://raw.githubusercontent.com/hilmi-collab/HM_Recommendation_System_on_GCP/main"
+# Note: Ensure these filenames match the ones in your repository
 NOTEBOOK_1="hm_two_tower_training.ipynb"
 NOTEBOOK_2="hm_ranking_lightgbm_training.ipynb"
 
@@ -20,20 +21,17 @@ REQ_FILE="requirements.txt"
 DOCKER_FILE="Dockerfile"
 
 echo -e "${BLUE}======================================================${NC}"
-echo -e "${BLUE}   H&M Workshop Setup (Hybrid Data Mode)              ${NC}"
+echo -e "${BLUE}   H&M Workshop Setup (High Performance Mode)         ${NC}"
 echo -e "${BLUE}======================================================${NC}"
 
 # 1. PROJECT INFO
 PROJECT_ID=$(gcloud config get-value project)
 USER_EMAIL=$(gcloud config get-value account)
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
-
-# KATILIMCININ KENDİ ÇALIŞMA BUCKET'I (Modeller buraya kaydedilecek)
 WORK_BUCKET_NAME="hm-workshop-${PROJECT_ID}"
 
 echo -e "${YELLOW}[Info]${NC} Project: ${GREEN}$PROJECT_ID${NC}"
 echo -e "${YELLOW}[Info]${NC} Work Bucket: ${GREEN}$WORK_BUCKET_NAME${NC}"
-echo -e "${YELLOW}[Info]${NC} Data Source: ${GREEN}gs://hm-recommendation-workshop (Public)${NC}"
 
 # 2. APIs
 echo -e "${BLUE}[Step 1/5] Enabling APIs...${NC}"
@@ -41,13 +39,11 @@ gcloud services enable aiplatform.googleapis.com dataform.googleapis.com compute
 
 # 3. IAM
 echo -e "${BLUE}[Step 2/5] Configuring IAM...${NC}"
-# User Permissions
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$USER_EMAIL" --role="roles/aiplatform.colabEnterpriseAdmin" > /dev/null 2>&1
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$USER_EMAIL" --role="roles/storage.admin" > /dev/null 2>&1
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$USER_EMAIL" --role="roles/run.admin" > /dev/null 2>&1
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$USER_EMAIL" --role="roles/iam.serviceAccountUser" > /dev/null 2>&1
 
-# Compute SA Permissions
 COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/storage.objectAdmin" > /dev/null 2>&1
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/aiplatform.user" > /dev/null 2>&1
@@ -55,8 +51,8 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COM
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/cloudbuild.builds.builder" > /dev/null 2>&1
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/run.admin" > /dev/null 2>&1
 
-# 4. RUNTIME TEMPLATES
-echo -e "${BLUE}[Step 3/5] Creating Colab Runtime Templates...${NC}"
+# 4. RUNTIME TEMPLATES (UPDATED: MORE POWERFUL MACHINES)
+echo -e "${BLUE}[Step 3/5] Creating High-Performance Runtime Templates...${NC}"
 REGION="us-central1"
 
 create_template() {
@@ -65,17 +61,21 @@ create_template() {
     if gcloud colab runtime-templates list --region=$REGION --filter="displayName=$T_NAME" --format="value(name)" 2>/dev/null | grep -q "$T_NAME"; then
         echo -e "${YELLOW}[Info]${NC} Template '$T_NAME' exists."
     else
+        echo -e "Creating template: ${YELLOW}$T_NAME${NC} ($M_TYPE)..."
         gcloud colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > /dev/null 2>&1
         if [ $? -eq 0 ]; then echo -e "${GREEN}✔ $T_NAME created.${NC}"; else gcloud beta colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > /dev/null 2>&1; fi
     fi
 }
+
+# RAM is crucial for Retrieval (n1-standard-8 -> 30GB RAM)
 create_template "hm-retrieval-gpu-template" "n1-standard-8"
-create_template "hm-ranking-gpu-template" "n1-standard-4"
+
+# CPU is crucial for Ranking (n1-standard-16 -> 16 vCPU, 60GB RAM)
+# This power is required for processing 6 weeks of data.
+create_template "hm-ranking-gpu-template" "n1-standard-16"
 
 # 5. WORK BUCKET & NOTEBOOKS
 echo -e "${BLUE}[Step 4/5] Setting up User Bucket & Notebooks...${NC}"
-
-# Sadece kullanıcının kendi bucket'ını oluşturuyoruz.
 if ! gsutil ls -b gs://$WORK_BUCKET_NAME > /dev/null 2>&1; then
     gsutil mb -l us-central1 gs://$WORK_BUCKET_NAME > /dev/null 2>&1
     echo -e "${GREEN}✔ Bucket created: $WORK_BUCKET_NAME${NC}"
@@ -86,7 +86,7 @@ upload_notebook() {
     if [ -f "$1" ]; then
         gsutil cp $1 gs://$WORK_BUCKET_NAME/notebooks/$1 > /dev/null 2>&1
         rm $1
-        echo -e "${GREEN}  -> $1 uploaded to user bucket.${NC}"
+        echo -e "${GREEN}  -> $1 uploaded.${NC}"
     fi
 }
 upload_notebook $NOTEBOOK_1
@@ -102,6 +102,5 @@ wget -q "$GITHUB_BASE_URL/$DOCKER_FILE" -O $DOCKER_FILE
 cd ..
 
 echo -e "${GREEN}======================================================${NC}"
-echo -e "🚀  **READY**"
+echo -e "🚀  **READY (HIGH PERFORMANCE)**"
 echo -e "Notebooks: gs://$WORK_BUCKET_NAME/notebooks"
-echo -e "Raw Data: gs://hm-recommendation-workshop (Public)"

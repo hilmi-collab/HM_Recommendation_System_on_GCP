@@ -3,122 +3,112 @@ import pandas as pd
 import requests
 import math
 import os
-from google.cloud import storage
-
 
 # ==============================================================================
-# 1. AYARLAR & KONFİGÜRASYON
+# 1. SETTINGS
 # ==============================================================================
-st.set_page_config(page_title="H&M AI Shop", layout="wide")
-
-# Cloud Run'a deploy ederken environment variable olarak vereceğiz
-BUCKET_NAME = os.environ.get("BUCKET_NAME", "hm-recommendation-workshop") 
+st.set_page_config(page_title="H&M AI Shop", layout="wide", page_icon="🛍️")
 
 # ==============================================================================
-# 2. YARDIMCI FONKSİYONLAR
+# 2. HELPER FUNCTIONS
 # ==============================================================================
 def get_image_url(article_id):
-    """Generates the correct image URL from Article ID."""
-    article_id = str(article_id)
+    # Whatever the ID is (int or str), convert to string first
+    # Then strip whitespace
+    # Then pad with zeros to ensure 10 digits
+    article_id = str(article_id).strip().zfill(10)
+    
     base_url = "https://repo.hops.works/dev/jdowling/h-and-m/images"
     folder = article_id[:3] 
     return f"{base_url}/{folder}/{article_id}.jpg"
 
 def sigmoid(x):
-    """Squeezes the logit score between 0-1."""
-    try:
-        return 1 / (1 + math.exp(-x))
-    except OverflowError:
-        return 0.0 if x < 0 else 1.0
-
-def download_blob(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a blob from the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(source_blob_name)
-    blob.download_to_filename(destination_file_name)
-    print(f"Downloaded {source_blob_name} to {destination_file_name}.")
+    try: return 1 / (1 + math.exp(-x))
+    except: return 0.0
 
 # ==============================================================================
-# 3. VERİ YÜKLEME (GCS & LOCAL)
+# 3. LOAD DATA
 # ==============================================================================
 @st.cache_data
 def load_data():
-    files = ['app_customers.parquet', 'app_articles.parquet', 'val_truth.parquet']
-    
-    # Check if files exist, if not try to download from GCS
-    for f in files:
-        if not os.path.exists(f):
-            try:
-                # Artifacts are stored under models/ranking_model in the bucket
-                gcs_path = f"models/ranking_model/{f}"
-                st.toast(f"Downloading {f} from GCS...", icon="☁️")
-                download_blob(BUCKET_NAME, gcs_path, f)
-            except Exception as e:
-                st.warning(f"Could not download {f}: {e}")
-
     try:
+        # Check if local parquet files exist
+        if not os.path.exists('app_customers.parquet'):
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
         cust = pd.read_parquet('app_customers.parquet')
         art = pd.read_parquet('app_articles.parquet')
-        try:
-            truth = pd.read_parquet('val_truth.parquet')
-        except:
-            truth = pd.DataFrame(columns=['customer_id', 'article_id'])
+        truth = pd.read_parquet('val_truth.parquet')
         return cust, art, truth
     except Exception as e:
-        st.error(f"Error loading data files. Make sure the training notebook ran successfully and artifacts are in GCS. Error: {e}")
-        st.stop()
+        st.error(f"Data loading error: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 customers, articles_df, truth_df = load_data()
 
 # ==============================================================================
-# 4. API İLETİŞİMİ
+# 4. API COMMUNICATION
 # ==============================================================================
 def get_recommendations(api_url, uid, history):
+    # Ensure URL ends with /predict
+    if not api_url.endswith("/predict"):
+        api_url = f"{api_url.rstrip('/')}/predict"
+
     payload = {"user_id": str(uid), "history": history}
     
     try:
-        response = requests.post(api_url, json=payload, timeout=10)
+        response = requests.post(api_url, json=payload, timeout=240)
         
-        try:
-            data = response.json()
-        except:
-            st.error(f"Backend returned non-JSON response: {response.text}")
+        if response.status_code != 200:
+            st.error(f"API Error ({response.status_code}): {response.text}")
             return []
-
-        if 'recommendations' in data:
-            return data['recommendations']
-        elif 'error' in data:
-            st.error(f"Backend Error: {data['error']}")
-            return []
-        else:
-            return []
-
+            
+        data = response.json()
+        
+        if isinstance(data, list): return data
+        elif isinstance(data, dict): return data.get('recommendations', [])
+        else: return []
+            
     except Exception as e:
         st.error(f"Connection Error: {e}")
         return []
 
 # ==============================================================================
-# 5. ARAYÜZ (UI)
+# 5. USER INTERFACE
 # ==============================================================================
 st.title("🛍️ H&M AI Recommender System")
 
 # --- SIDEBAR ---
-st.sidebar.header("⚙️ Configuration")
-
-# Dynamic API URL Input
-default_api = "https://YOUR-CLOUD-RUN-URL.run.app/predict"
-api_url = st.sidebar.text_input("Backend API URL:", value=default_api, help="Paste the URL of your deployed Ranking Service here.")
+st.sidebar.header("⚙️ Settings")
+default_api = "https://YOUR-CLOUD-RUN-URL.run.app"
+api_url = st.sidebar.text_input("Backend API URL:", value=default_api)
 
 st.sidebar.divider()
-st.sidebar.header("👤 User Panel")
+st.sidebar.header("👤 Customer Selection")
 
-valid_users = truth_df['customer_id'].unique()
-all_users = customers['customer_id'].unique()
-# Prioritize users with history
-sorted_users = list(valid_users) + [u for u in all_users if u not in valid_users]
+# --- SMART USER FILTER ---
+if not truth_df.empty:
+    # Filter users who shopped during the Validation week
+    # And sort by most active users (Active users on top)
+    active_users = truth_df['customer_id'].value_counts().index.tolist()
+    
+    # Put the top 2000 active users in the dropdown
+    display_users = active_users[:2000]
+    
+    st.sidebar.info(f"There are {len(active_users)} active users in the test week.")
+else:
+    display_users = []
+    st.sidebar.warning("Validation data not found.")
 
-selected_user = st.sidebar.selectbox("Select Customer:", sorted_users)
+# Search and Select
+manual_id = st.sidebar.text_input("🔍 Search by ID (Paste):")
+dropdown_user = st.sidebar.selectbox("🏆 Top Active Users:", display_users)
+
+# Selection Logic
+if manual_id:
+    selected_user = manual_id.strip()
+else:
+    selected_user = dropdown_user
 
 # Session State
 if 'active_user' not in st.session_state:
@@ -128,105 +118,82 @@ if 'active_user' not in st.session_state:
 if st.session_state.active_user != selected_user:
     st.session_state.cart = [] 
     st.session_state.active_user = selected_user
-    st.toast(f"User changed to: {selected_user[:10]}...", icon="🔄")
 
-if selected_user in customers['customer_id'].values:
-    user_info = customers[customers['customer_id'] == selected_user].iloc[0]
-    st.sidebar.info(f"**Age:** {int(user_info['age'])}\n**Club Status:** {user_info['club_member_status']}")
+# User Info / Metadata
+if selected_user and not customers.empty:
+    user_row = customers[customers['customer_id'] == selected_user]
+    
+    if not user_row.empty:
+        age = int(user_row.iloc[0]['age'])
+        status = user_row.iloc[0]['club_member_status']
+        st.sidebar.success(f"Profile Loaded")
+        st.sidebar.info(f"**Age:** {age} | **Status:** {status}")
+    else:
+        st.sidebar.warning("User metadata not found (Cold User).")
 
-# --- SIDEBAR: CART ---
+# Cart
 st.sidebar.divider()
 st.sidebar.subheader(f"🛒 Cart ({len(st.session_state.cart)})")
-
-if st.session_state.cart:
-    for item_id in st.session_state.cart:
-        p_row = articles_df[articles_df['article_id'] == item_id]
-        c1, c2 = st.sidebar.columns([1, 3])
-        with c1:
-            st.image(get_image_url(item_id), use_container_width=True)
-        with c2:
-            if not p_row.empty:
-                st.markdown(f"**{p_row.iloc[0]['prod_name']}**")
-            else:
-                st.write(f"ID: {item_id}")
-
-    if st.sidebar.button("🗑️ Clear Cart", use_container_width=True):
-        st.session_state.cart = []
-        st.rerun()
-else:
-    st.sidebar.caption("Cart is empty.")
+if st.sidebar.button("Clear Cart"):
+    st.session_state.cart = []
+    st.rerun()
 
 # --- MAIN SCREEN ---
+if "YOUR-CLOUD-RUN-URL" in api_url:
+    st.warning("👈 Please enter your Backend URL.")
+elif selected_user:
+    # Real Ground Truth Data
+    real_purchases = []
+    if not truth_df.empty:
+        real_purchases = truth_df[truth_df['customer_id'] == selected_user]['article_id'].tolist()
+        real_purchases = [str(x) for x in real_purchases]
 
-# 1. Ground Truth
-if not truth_df.empty:
-    actual_purchases = truth_df[truth_df['customer_id'] == selected_user]['article_id'].tolist()
-    actual_purchases = [str(x) for x in actual_purchases]
-else:
-    actual_purchases = []
-
-# 2. Fetch Recommendations
-if "YOUR-CLOUD-RUN-URL" in api_url or not api_url:
-    st.warning("⚠️ Please enter your valid Backend API URL in the sidebar.")
-    recommendations = []
-else:
-    with st.spinner(f"🤖 AI is analyzing profile for {selected_user[:10]}..."):
-        recommendations = get_recommendations(api_url, selected_user, st.session_state.cart)
-
-recommended_ids = [str(item['article_id']) for item in recommendations]
-
-# 3. Display Recommendations
-st.subheader(f"Recommended for You")
-
-if recommendations:
-    cols = st.columns(4)
-    for i, item in enumerate(recommendations):
-        with cols[i % 4]:
-            aid = str(item['article_id'])
-            
-            product_info = articles_df[articles_df['article_id'] == aid]
-            if not product_info.empty:
-                prod_name = product_info.iloc[0]['prod_name']
-                category = product_info.iloc[0].get('product_group_name', 'General')
-            else:
-                prod_name = item['prod_name']
-                category = "Unknown"
-
-            # Check if prediction matches ground truth
-            if aid in actual_purchases:
-                st.success("✅ HIT!")
-            
-            st.image(get_image_url(aid), use_container_width=True)
-            st.markdown(f"**{prod_name}**")
-            st.caption(f"{category}")
-            
-            # Score Bar
-            score_val = sigmoid(item['score'])
-            st.progress(score_val, text=f"Score: {score_val:.2f}")
-            
-            if st.button("Add to Cart 🛒", key=f"rec_{aid}", use_container_width=True):
-                st.session_state.cart.append(aid)
-                st.rerun()
-elif "YOUR-CLOUD-RUN-URL" not in api_url:
-    st.info("No recommendations found or backend is warming up.")
-
-# 4. Display Ground Truth
-st.divider()
-st.subheader("🛒 Actual Purchases (Test Data)")
-
-if actual_purchases:
-    st.caption(f"User bought {len(actual_purchases)} items in the test week.")
-    cols_actual = st.columns(6)
+    st.markdown(f"### 🤖 AI Recommendations: `{selected_user[:10]}...`")
     
-    for i, aid in enumerate(actual_purchases):
-        with cols_actual[i % 6]:
-            img_url = get_image_url(aid)
-            
-            if aid in recommended_ids:
-                st.markdown(":green[**✅ Found**]")
-            else:
-                st.markdown(":red[**❌ Missed**]")
+    with st.spinner("Preparing recommendations..."):
+        recs = get_recommendations(api_url, selected_user, st.session_state.cart)
+    
+    rec_ids = []
+    for r in recs:
+        if isinstance(r, dict):
+            rec_ids.append(str(r.get('article_id')))
 
-            st.image(img_url, use_container_width=True)
-else:
-    st.info("No purchase history for this user in the test set.")
+    if recs:
+        cols = st.columns(4)
+        for i, item in enumerate(recs):
+            with cols[i % 4]:
+                if not isinstance(item, dict): continue
+                
+                aid = str(item.get('article_id', 'Unknown'))
+                img = get_image_url(aid)
+                score_val = sigmoid(item.get('score', 0))
+                
+                st.image(img, use_container_width=True)
+                st.markdown(f"**{item.get('prod_name', 'Product')}**")
+                
+                if aid in real_purchases:
+                    st.success(f"🎯 HIT! ({score_val:.2f})")
+                else:
+                    st.caption(f"Confidence: {score_val:.2f}")
+                
+                if st.button("Add", key=f"btn_{i}_{aid}"):
+                    st.session_state.cart.append(aid)
+                    st.rerun()
+    else:
+        st.info("No recommendations found for this user.")
+    
+    st.divider()
+    
+    # Ground Truth Section
+    if real_purchases:
+        st.subheader(f"🛒 What did they actually buy? ({len(real_purchases)} Items)")
+        cols = st.columns(6)
+        for i, aid in enumerate(real_purchases):
+            with cols[i%6]:
+                st.image(get_image_url(aid), use_container_width=True)
+                if aid in rec_ids:
+                    st.markdown(":green[**✅ Model Hit**]")
+                else:
+                    st.markdown(":red[**❌ Missed**]")
+    else:
+        st.info("This user did not make any purchases during the test week (Sept 2020).")

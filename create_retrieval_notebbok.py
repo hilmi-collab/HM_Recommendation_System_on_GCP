@@ -1,26 +1,66 @@
-import nbformat as nbf
+import json
+import os
 
-nb = nbf.v4.new_notebook()
+def create_notebook():
+    # Notebook Metadata
+    notebook = {
+        "cells": [],
+        "metadata": {
+            "colab": {
+                "provenance": []
+            },
+            "kernelspec": {
+                "display_name": "Python 3",
+                "name": "python3"
+            },
+            "language_info": {
+                "codemirror_mode": {
+                    "name": "ipython",
+                    "version": 3
+                },
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.10.12"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 0
+    }
 
-# -------------------------------------------------------------------------
-# CELL 1: CONFIGURATION (DATA & WORK BUCKET AYRIMI)
-# -------------------------------------------------------------------------
-text_1 = """# @title ⚙️ Workshop Configuration
+    def add_cell(source_code, cell_type="code"):
+        cell = {
+            "cell_type": cell_type,
+            "metadata": {},
+            "source": source_code.splitlines(keepends=True),
+            "outputs": [],
+            "execution_count": None
+        }
+        if cell_type == "markdown":
+            del cell["outputs"]
+            del cell["execution_count"]
+        notebook["cells"].append(cell)
+
+    # --- CELL 1: Configuration ---
+    cell_1 = """# -*- coding: utf-8 -*-
+# @title ⚙️ Workshop Configuration
 # @markdown Please enter your Project ID.
 
 import os
 
 # @markdown ### ☁️ Project Settings
-PROJECT_ID = "your-project-id-here" # @param {type:"string"}
+PROJECT_ID = "ace-team-hilmi-service" # @param {type:"string"}
 REGION = "us-central1" # @param {type:"string"}
 
 # 1. PUBLIC DATA BUCKET (Read-Only)
-# Ham veriler (CSV) buradan okunacak.
+# Raw data (CSV) will be read from here.
 DATA_BUCKET_NAME = "hm-recommendation-workshop"
 DATA_GCS_PATH = f"gs://{DATA_BUCKET_NAME}"
 
 # 2. PRIVATE WORK BUCKET (Write)
-# Eğitilen modeller buraya kaydedilecek.
+# Trained models will be saved here.
 WORK_BUCKET_NAME = f"hm-workshop-{PROJECT_ID}"
 WORK_GCS_PATH = f"gs://{WORK_BUCKET_NAME}"
 
@@ -31,31 +71,23 @@ EPOCHS = 5 # @param {type:"slider", min:1, max:10, step:1}
 
 # Setup Environment
 os.environ["GCLOUD_PROJECT"] = PROJECT_ID
-os.environ["TF_USE_LEGACY_KERAS"] = "1" 
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 print(f"✅ Config Set:")
 print(f"   📥 Reading Data from: {DATA_GCS_PATH}")
-print(f"   💾 Saving Models to:  {WORK_GCS_PATH}/models/two-tower-model")
-"""
-cell_1 = nbf.v4.new_code_cell(text_1)
-cell_1.metadata = {"cellView": "form", "id": "config_cell"}
+print(f"   💾 Saving Models to:  {WORK_GCS_PATH}/models/two-tower-model")"""
+    add_cell(cell_1)
 
-# -------------------------------------------------------------------------
-# CELL 2: INSTALLATION
-# -------------------------------------------------------------------------
-text_2 = """# @title 📥 Step 1: Install Libraries
+    # --- CELL 2: Install Libraries ---
+    cell_2 = """# @title 📥 Step 1: Install Libraries
 !pip install -q tensorflow-recommenders --no-deps
 !pip install -q --upgrade tensorflow-datasets
 !pip install -q "scann[tf]" tensorflow-recommenders tensorflow-datasets
-print("✅ Installation Complete.")
-"""
-cell_2 = nbf.v4.new_code_cell(text_2)
-cell_2.metadata = {"cellView": "form", "id": "install_cell"}
+print("✅ Installation Complete.")"""
+    add_cell(cell_2)
 
-# -------------------------------------------------------------------------
-# CELL 3: IMPORTS & DATA LOADING (PUBLIC BUCKET'TAN OKUMA)
-# -------------------------------------------------------------------------
-text_3 = """# @title 💾 Step 2: Load Data from Public Bucket
+    # --- CELL 3: Load Data ---
+    cell_3 = """# @title 💾 Step 2: Load Data from Public Bucket
 import os
 import numpy as np
 import pandas as pd
@@ -94,7 +126,7 @@ transactions_df = pd.read_csv(TRANSACTIONS_PATH, parse_dates=['t_dat'], dtype={'
 val_start_date = pd.to_datetime('2020-09-09')
 train_start_date = val_start_date - pd.DateOffset(years=1)
 train_df = transactions_df[
-    (transactions_df['t_dat'] < val_start_date) & 
+    (transactions_df['t_dat'] < val_start_date) &
     (transactions_df['t_dat'] >= train_start_date)
 ].copy()
 
@@ -103,15 +135,11 @@ train_df['week_of_month'] = ((train_df['t_dat'].dt.day - 1) // 7 + 1).astype(str
 interactions_df = train_df[['customer_id', 'article_id', 'month_of_year', 'week_of_month']]
 
 print(f"✅ Training dataset ready: {len(interactions_df)} rows.")
-del transactions_df, train_df
-"""
-cell_3 = nbf.v4.new_code_cell(text_3)
-cell_3.metadata = {"cellView": "form", "id": "data_load_cell"}
+del transactions_df, train_df"""
+    add_cell(cell_3)
 
-# -------------------------------------------------------------------------
-# CELL 4: PREPROCESSING
-# -------------------------------------------------------------------------
-text_4 = """# @title 🔧 Step 3: Preprocessing
+    # --- CELL 4: Preprocessing ---
+    cell_4 = """# @title 🔧 Step 3: Preprocessing
 customer_ids = customers_df['customer_id'].unique()
 article_ids = articles_df['article_id'].unique()
 age_groups = customers_df['age_bin'].unique()
@@ -142,15 +170,11 @@ def add_features(features):
     return features
 
 interactions_ds = interactions_ds.map(add_features, num_parallel_calls=tf.data.AUTOTUNE)
-print("✅ Lookup tables created.")
-"""
-cell_4 = nbf.v4.new_code_cell(text_4)
-cell_4.metadata = {"cellView": "form", "id": "prep_cell"}
+print("✅ Lookup tables created.")"""
+    add_cell(cell_4)
 
-# -------------------------------------------------------------------------
-# CELL 5: MODEL DEFINITION
-# -------------------------------------------------------------------------
-text_5 = """# @title 🧠 Step 4: Define Two-Tower Model
+    # --- CELL 5: Define Model Architecture ---
+    cell_5 = """# @title 🧠 Step 4: Define Two-Tower Model
 class UserModel(tf.keras.Model):
     def __init__(self):
         super().__init__()
@@ -205,29 +229,21 @@ class HMRModel(tfrs.Model):
         item_embeddings = self.item_model(features)
         return self.task(user_embeddings, item_embeddings)
 
-print("✅ Model architecture defined.")
-"""
-cell_5 = nbf.v4.new_code_cell(text_5)
-cell_5.metadata = {"cellView": "form", "id": "model_def_cell"}
+print("✅ Model architecture defined.")"""
+    add_cell(cell_5)
 
-# -------------------------------------------------------------------------
-# CELL 6: TRAINING
-# -------------------------------------------------------------------------
-text_6 = """# @title 🏋️ Step 5: Train the Model
+    # --- CELL 6: Training ---
+    cell_6 = """# @title 🏋️ Step 5: Train the Model
 cached_train = interactions_ds.shuffle(100_000).batch(16384).cache().prefetch(tf.data.AUTOTUNE)
 model = HMRModel()
 model.compile(optimizer=tf.keras.optimizers.Adagrad(LEARNING_RATE))
 print(f"Starting training for {EPOCHS} epochs...")
 history = model.fit(cached_train, epochs=EPOCHS)
-print("✅ Training finished.")
-"""
-cell_6 = nbf.v4.new_code_cell(text_6)
-cell_6.metadata = {"cellView": "form", "id": "train_cell"}
+print("✅ Training finished.")"""
+    add_cell(cell_6)
 
-# -------------------------------------------------------------------------
-# CELL 7: SCANN INDEX
-# -------------------------------------------------------------------------
-text_7 = """# @title 🔍 Step 6: Build ScaNN Index
+    # --- CELL 7: ScaNN Index ---
+    cell_7 = """# @title 🔍 Step 6: Build ScaNN Index
 scann_index = tfrs.layers.factorized_top_k.ScaNN(
     model.user_model,
     num_reordering_candidates=500,
@@ -245,15 +261,11 @@ sample_query = {
     "week_of_month": tf.constant(["2"])
 }
 _ = scann_index(sample_query)
-print("✅ ScaNN index built successfully.")
-"""
-cell_7 = nbf.v4.new_code_cell(text_7)
-cell_7.metadata = {"cellView": "form", "id": "scann_cell"}
+print("✅ ScaNN index built successfully.")"""
+    add_cell(cell_7)
 
-# -------------------------------------------------------------------------
-# CELL 8: SAVE TO WORK BUCKET (WORK_GCS_PATH)
-# -------------------------------------------------------------------------
-text_8 = """# @title 💾 Step 7: Save Model to User Bucket
+    # --- CELL 8: Save Model ---
+    cell_8 = """# @title 💾 Step 7: Save Model to User Bucket
 class ServingModel(tf.keras.Model):
     def __init__(self, index_layer):
         super().__init__()
@@ -271,17 +283,18 @@ class ServingModel(tf.keras.Model):
 serving_model = ServingModel(scann_index)
 _ = serving_model(sample_query)
 
-# MODELİ PRIVATE WORK BUCKET'A KAYDETME
+# SAVING THE MODEL TO PRIVATE WORK BUCKET
 MODEL_SAVE_PATH = os.path.join(WORK_GCS_PATH, 'models/two-tower-model')
 print(f"Saving model to: {MODEL_SAVE_PATH}")
 tf.saved_model.save(serving_model, MODEL_SAVE_PATH)
-print("✅ Model saved successfully.")
-"""
-cell_8 = nbf.v4.new_code_cell(text_8)
-cell_8.metadata = {"cellView": "form", "id": "save_cell"}
+print("✅ Model saved successfully.")"""
+    add_cell(cell_8)
 
-nb.cells.extend([cell_1, cell_2, cell_3, cell_4, cell_5, cell_6, cell_7, cell_8])
-with open('hm_two_tower_training.ipynb', 'w') as f:
-    nbf.write(nb, f)
+    # Save to file
+    with open('hm_two_tower_training.ipynb', 'w', encoding='utf-8') as f:
+        json.dump(notebook, f, indent=2, ensure_ascii=False)
 
-print("🎉 'hm_two_tower_training.ipynb' updated (Hybrid Data Mode)!")
+    print("Successfully created 'hm_two_tower_training_english.ipynb'.")
+
+if __name__ == "__main__":
+    create_notebook()
