@@ -33,11 +33,11 @@ def sigmoid(x):
 def load_data():
     try:
         # Check if local parquet files exist
-        if not os.path.exists('app_customers.parquet'):
+        if not os.path.exists('app_customers_features.parquet'):
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-        cust = pd.read_parquet('app_customers.parquet')
-        art = pd.read_parquet('app_articles.parquet')
+        cust = pd.read_parquet('app_customers_features.parquet')
+        art = pd.read_parquet('app_articles_features.parquet')
         truth = pd.read_parquet('val_truth.parquet')
         return cust, art, truth
     except Exception as e:
