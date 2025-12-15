@@ -56,42 +56,54 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COM
 echo -e "${BLUE}[Step 3/5] Creating High-Performance Runtime Templates...${NC}"
 REGION="us-central1"
 
+
 create_template() {
     local T_NAME=$1
     local M_TYPE=$2
     
-    # 1. Template zaten var mı kontrol et
+
+    local NETWORK_URI="projects/$PROJECT_ID/global/networks/default"
+    local SUBNET_URI="projects/$PROJECT_ID/regions/$REGION/subnetworks/default"
+    
     if gcloud colab runtime-templates list --region=$REGION --filter="displayName=$T_NAME" --format="value(name)" 2>/dev/null | grep -q "$T_NAME"; then
         echo -e "${YELLOW}[Info]${NC} Template '$T_NAME' exists."
     else
         echo -e "Creating template: ${YELLOW}$T_NAME${NC} ($M_TYPE)..."
         
-        # Geçici bir log dosyası oluştur
-        ERR_LOG=$(mktemp)
 
-        # 2. Standart komutu dene, çıktıyı log dosyasına yaz
-        if gcloud colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > "$ERR_LOG" 2>&1; then
+        gcloud colab runtime-templates create \
+            --project=$PROJECT_ID \
+            --region=$REGION \
+            --display-name=$T_NAME \
+            --machine-type=$M_TYPE \
+            --accelerator-type=NVIDIA_TESLA_T4 \
+            --accelerator-count=1 \
+            --network=$NETWORK_URI \
+            --subnetwork=$SUBNET_URI > /dev/null 2>&1
+        
+        if [ $? -eq 0 ]; then 
             echo -e "${GREEN}✔ $T_NAME created.${NC}"
-            rm "$ERR_LOG"
-        else
-            # 3. Başarısız olursa Beta komutunu dene (yine loglayarak)
+        else 
             echo -e "${YELLOW}[Warning] Standard creation failed. Retrying with 'gcloud beta'...${NC}"
-            if gcloud beta colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > "$ERR_LOG" 2>&1; then
-                 echo -e "${GREEN}✔ $T_NAME created (via Beta).${NC}"
-                 rm "$ERR_LOG"
-            else
-                 # 4. İkisi de başarısız olursa HATAYI BAS
-                 echo -e "${RED}[ERROR] Failed to create template '$T_NAME'!${NC}"
-                 echo -e "${RED}Detailed Error Log:${NC}"
-                 echo "---------------------------------------------------"
-                 cat "$ERR_LOG"
-                 echo "---------------------------------------------------"
-                 rm "$ERR_LOG"
-                 # Opsiyonel: Scriptin burada durmasını istersen 'exit 1' ekleyebilirsin
+
+            gcloud beta colab runtime-templates create \
+                --project=$PROJECT_ID \
+                --region=$REGION \
+                --display-name=$T_NAME \
+                --machine-type=$M_TYPE \
+                --accelerator-type=NVIDIA_TESLA_T4 \
+                --accelerator-count=1 \
+                --network=$NETWORK_URI \
+                --subnetwork=$SUBNET_URI
+            
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}❌ Error: Template creation failed.${NC}"
             fi
         fi
     fi
 }
+
+
 
 # RAM is crucial for Retrieval (n1-standard-8 -> 30GB RAM)
 create_template "hm-retrieval-gpu-template" "n1-standard-8"
