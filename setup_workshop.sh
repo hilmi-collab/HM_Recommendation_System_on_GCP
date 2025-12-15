@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # ==============================================================================
-# H&M RECOMMENDATION WORKSHOP - SETUP SCRIPT (HIGH PERFORMANCE)
+# H&M RECOMMENDATION WORKSHOP - SETUP SCRIPT (HIGH PERFORMANCE - DEBUG MODU)
 # ==============================================================================
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'  # Hata mesajları için kırmızı renk eklendi
 NC='\033[0m' 
 
 # 🔧 CONFIGURATION
@@ -51,19 +52,44 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COM
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/cloudbuild.builds.builder" > /dev/null 2>&1
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:$COMPUTE_SA" --role="roles/run.admin" > /dev/null 2>&1
 
-# 4. RUNTIME TEMPLATES (UPDATED: MORE POWERFUL MACHINES)
+# 4. RUNTIME TEMPLATES (GÜNCELLENMİŞ FONKSİYON)
 echo -e "${BLUE}[Step 3/5] Creating High-Performance Runtime Templates...${NC}"
 REGION="us-central1"
 
 create_template() {
     local T_NAME=$1
     local M_TYPE=$2
+    
+    # 1. Template zaten var mı kontrol et
     if gcloud colab runtime-templates list --region=$REGION --filter="displayName=$T_NAME" --format="value(name)" 2>/dev/null | grep -q "$T_NAME"; then
         echo -e "${YELLOW}[Info]${NC} Template '$T_NAME' exists."
     else
         echo -e "Creating template: ${YELLOW}$T_NAME${NC} ($M_TYPE)..."
-        gcloud colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > /dev/null 2>&1
-        if [ $? -eq 0 ]; then echo -e "${GREEN}✔ $T_NAME created.${NC}"; else gcloud beta colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > /dev/null 2>&1; fi
+        
+        # Geçici bir log dosyası oluştur
+        ERR_LOG=$(mktemp)
+
+        # 2. Standart komutu dene, çıktıyı log dosyasına yaz
+        if gcloud colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > "$ERR_LOG" 2>&1; then
+            echo -e "${GREEN}✔ $T_NAME created.${NC}"
+            rm "$ERR_LOG"
+        else
+            # 3. Başarısız olursa Beta komutunu dene (yine loglayarak)
+            echo -e "${YELLOW}[Warning] Standard creation failed. Retrying with 'gcloud beta'...${NC}"
+            if gcloud beta colab runtime-templates create --project=$PROJECT_ID --region=$REGION --display-name=$T_NAME --machine-type=$M_TYPE --accelerator-type=NVIDIA_TESLA_T4 --accelerator-count=1 > "$ERR_LOG" 2>&1; then
+                 echo -e "${GREEN}✔ $T_NAME created (via Beta).${NC}"
+                 rm "$ERR_LOG"
+            else
+                 # 4. İkisi de başarısız olursa HATAYI BAS
+                 echo -e "${RED}[ERROR] Failed to create template '$T_NAME'!${NC}"
+                 echo -e "${RED}Detailed Error Log:${NC}"
+                 echo "---------------------------------------------------"
+                 cat "$ERR_LOG"
+                 echo "---------------------------------------------------"
+                 rm "$ERR_LOG"
+                 # Opsiyonel: Scriptin burada durmasını istersen 'exit 1' ekleyebilirsin
+            fi
+        fi
     fi
 }
 
